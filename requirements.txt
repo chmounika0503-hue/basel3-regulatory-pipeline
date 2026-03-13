@@ -1,0 +1,10 @@
+
+pyspark
+pandas
+faker
+sqlalchemy
+psycopg2-binary
+apache-airflow
+plotly
+dash
+requests

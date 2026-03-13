@@ -1,0 +1,133 @@
+﻿name: Basel III Pipeline CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: bankuser
+          POSTGRES_PASSWORD: bankpass
+          POSTGRES_DB: basel3
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create sample data
+        run: |
+          mkdir -p data/raw_balance_sheets
+          cat > data/balance_sheet.csv << 'EOF'
+          bank_id,metric_date,tier1_capital,risk_weighted_assets,liquid_assets,cash_outflows_30d,non_performing_loans,total_loans
+          BankA,2024-01-01,800000,5000000,1200000,900000,150000,3000000
+          BankB,2024-01-01,600000,4000000,800000,1100000,300000,2500000
+          BankC,2024-01-01,900000,6000000,1500000,1000000,100000,4000000
+          BankD,2024-01-01,400000,3000000,500000,900000,400000,2000000
+          EOF
+
+      - name: Create DB tables
+        env:
+          PGPASSWORD: bankpass
+        run: |
+          psql -h localhost -U bankuser -d basel3 -c "
+            CREATE TABLE IF NOT EXISTS regulatory_metrics (
+              bank_id VARCHAR, metric_date DATE,
+              car FLOAT, lcr FLOAT, npl FLOAT,
+              benchmark_car FLOAT, benchmark_lcr FLOAT, benchmark_npl FLOAT,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS benchmark_comparison (
+              bank_id VARCHAR, metric_date DATE,
+              car FLOAT, lcr FLOAT, npl FLOAT, npl_ratio FLOAT,
+              benchmark_car FLOAT, benchmark_lcr FLOAT, benchmark_npl FLOAT,
+              car_delta FLOAT, lcr_delta FLOAT, npl_delta FLOAT,
+              car_status VARCHAR, lcr_status VARCHAR
+            );"
+
+      - name: Run metric validation tests
+        run: python -m pytest tests/ -v
+
+      - name: Validate CAR formula
+        run: |
+          python - << 'EOF'
+          tier1 = 800000
+          rwa = 5000000
+          car = tier1 / rwa
+          assert abs(car - 0.16) < 0.001, f"CAR formula failed: {car}"
+          print(f"CAR validation passed: {car:.4f}")
+          EOF
+
+      - name: Validate LCR formula
+        run: |
+          python - << 'EOF'
+          hqla = 1200000
+          outflows = 900000
+          lcr = hqla / outflows
+          assert abs(lcr - 1.3333) < 0.001, f"LCR formula failed: {lcr}"
+          print(f"LCR validation passed: {lcr:.4f}")
+          EOF
+
+      - name: Validate NPL formula
+        run: |
+          python - << 'EOF'
+          npl = 150000
+          total = 3000000
+          npl_ratio = npl / total
+          assert abs(npl_ratio - 0.05) < 0.001, f"NPL formula failed: {npl_ratio}"
+          print(f"NPL validation passed: {npl_ratio:.4f}")
+          EOF
+
+      - name: Validate report generation
+        env:
+          DB_HOST: localhost
+          DB_USER: bankuser
+          DB_PASS: bankpass
+          DB_NAME: basel3
+        run: |
+          python - << 'EOF'
+          import psycopg2
+          conn = psycopg2.connect("host=localhost port=5432 dbname=basel3 user=bankuser password=bankpass")
+          cur = conn.cursor()
+          cur.execute("SELECT COUNT(*) FROM regulatory_metrics")
+          count = cur.fetchone()[0]
+          print(f"regulatory_metrics rows: {count}")
+          conn.close()
+          EOF
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install flake8
+        run: pip install flake8
+      - name: Lint Python files
+        run: |
+          flake8 scripts/ dashboard/ --max-line-length=120 --ignore=E501,W503 --exclude=venv
