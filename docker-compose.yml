@@ -1,4 +1,4 @@
-﻿version: '3.8'
+version: '3.8'
 
 services:
   postgres:
@@ -74,6 +74,11 @@ services:
       AIRFLOW__WEBSERVER__SECRET_KEY: 'basel3_secret'
     volumes:
       - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+      - ./data:/opt/airflow/data
+      - ./scripts:/opt/airflow/scripts
+      - ./spark_jobs:/opt/airflow/spark_jobs
+      - ./data:/opt/airflow/data
     ports:
       - "8082:8080"
     depends_on:
@@ -90,6 +95,11 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     volumes:
       - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+      - ./data:/opt/airflow/data
+      - ./scripts:/opt/airflow/scripts
+      - ./spark_jobs:/opt/airflow/spark_jobs
+      - ./data:/opt/airflow/data
     depends_on:
       airflow-db:
         condition: service_healthy
@@ -98,3 +108,5 @@ services:
 volumes:
   postgres_data:
   airflow_db_data:
+
+

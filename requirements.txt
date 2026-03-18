@@ -1,10 +1,13 @@
-
-pyspark
+﻿pyspark==3.5.0
 pandas
 faker
 sqlalchemy
 psycopg2-binary
-apache-airflow
+apache-airflow==2.7.3
 plotly
 dash
 requests
+pytest
+flake8
+reportlab
+numpy
