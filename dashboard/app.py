@@ -4,9 +4,13 @@ import plotly.graph_objects as go
 import pandas as pd
 from sqlalchemy import create_engine
 
+# We import dash for the web framework, pandas to read database results into a DataFrame, plotly.graph_objects to create the charts and sqlalchemy to connect to PostgreSQL.
+
 # ── Database connection ──────────────────────────────────────────────────────
 engine = create_engine("postgresql://bankuser:bankpass@localhost:5432/basel3")
 df = pd.read_sql("select * from regulatory_metrics", engine)
+
+# create_engine creates a connection to the PostgreSQL database. pd.read_sql runs a SELECT query and loads all results into a pandas DataFrame. This is the live data that powers all the charts. Every time the dashboard reloads it reads fresh data from the database.
 
 # ── Colours ──────────────────────────────────────────────────────────────────
 PASS_COLOR  = "#2ECC71"   # green

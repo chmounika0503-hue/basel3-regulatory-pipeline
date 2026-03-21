@@ -1,21 +1,40 @@
-﻿from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, lit, round as spark_round
+# This is the final PySpark job. It takes the 3 separate results files from CAR, LCR and NPL
+# and joins them together into one complete table. It then loads everything into PostgreSQL
+# so the dashboard and report generator can display the results.
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, lit, when
 
 spark = SparkSession.builder.appName("FDICBenchmarkJoin").getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 
-car = spark.read.parquet("/opt/data/processed/car_metrics").select("bank_id","metric_date","car")
-lcr = spark.read.parquet("/opt/data/processed/lcr_metrics").select("bank_id","metric_date","lcr")
-npl = spark.read.parquet("/opt/data/processed/npl_metrics").select("bank_id","metric_date","npl_ratio")
+# Read all 3 Parquet files saved by the previous compute jobs
+# Using relative Windows paths instead of Linux /opt/data/ paths
+car = spark.read.parquet("data/processed/car_metrics").select("bank_id", "metric_date", "car")
+lcr = spark.read.parquet("data/processed/lcr_metrics").select("bank_id", "metric_date", "lcr")
+npl = spark.read.parquet("data/processed/npl_metrics").select("bank_id", "metric_date", "npl_ratio")
 
-bank_metrics = car.join(lcr, ["bank_id","metric_date"]).join(npl, ["bank_id","metric_date"])
+# Join all 3 results on bank_id AND metric_date
+# We join on both columns so January data never mixes with February data
+bank_metrics = car.join(lcr, ["bank_id", "metric_date"]).join(npl, ["bank_id", "metric_date"])
 
-bench_car, bench_lcr, bench_npl = 0.14, 1.20, 0.015
+# Add benchmark values and PASS/FAIL status for each metric
+result = bank_metrics \
+    .withColumn("benchmark_car", lit(14.0)) \
+    .withColumn("benchmark_lcr", lit(120.0)) \
+    .withColumn("benchmark_npl", lit(1.5)) \
+    .withColumn("car_delta", col("car") - lit(14.0)) \
+    .withColumn("lcr_delta", col("lcr") - lit(120.0)) \
+    .withColumn("npl_delta", col("npl_ratio") - lit(1.5)) \
+    .withColumn("car_status", when(col("car") >= 14.0, "PASS").otherwise("FAIL")) \
+    .withColumn("lcr_status", when(col("lcr") >= 120.0, "PASS").otherwise("FAIL")) \
+    .withColumn("npl_status", when(col("npl_ratio") <= 1.5, "PASS").otherwise("FAIL"))
 
-result = bank_metrics.withColumn("benchmark_car", lit(bench_car)).withColumn("benchmark_lcr", lit(bench_lcr)).withColumn("benchmark_npl", lit(bench_npl)).withColumn("car_delta", col("car") - lit(bench_car)).withColumn("lcr_delta", col("lcr") - lit(bench_lcr)).withColumn("npl_delta", col("npl_ratio") - lit(bench_npl)).withColumn("car_status", (col("car") >= 0.08).cast("string")).withColumn("lcr_status", (col("lcr") >= 1.0).cast("string"))
-
+# Show results in console
 result.show(truncate=False)
-result.write.parquet("/opt/data/processed/benchmark_comparison", mode="overwrite")
-result.withColumnRenamed("npl_ratio","npl").write.format("jdbc").option("url","jdbc:postgresql://postgres:5432/basel3").option("dbtable","benchmark_comparison").option("user","bankuser").option("password","bankpass").option("driver","org.postgresql.Driver").mode("overwrite").save()
+
+# Save to Parquet
+result.write.mode("overwrite").parquet("data/processed/benchmark_comparison")
+
 print("FDIC benchmark join complete")
 spark.stop()
