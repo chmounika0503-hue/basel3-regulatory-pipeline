@@ -20,5 +20,8 @@ python spark_jobs\compute_npl.py
 echo Running benchmark join...
 python spark_jobs\fdic_benchmark_join.py
 
+echo Running risk score...
+python spark_jobs\compute_risk_score.py
+
 echo All jobs complete!
 pause
